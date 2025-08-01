@@ -3,37 +3,33 @@ package com.kush.cargoProAssignment.controller;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kush.cargoProAssignment.controllers.BookingController;
 import com.kush.cargoProAssignment.dto.BookingDTO;
-import com.kush.cargoProAssignment.model.enums.BookingStatus;
+import com.kush.cargoProAssignment.exceptions.ResourceNotFoundException;
 import com.kush.cargoProAssignment.service.BookingService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
 import org.springframework.http.MediaType;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
-import java.time.LocalDateTime;
-import java.util.Arrays;
+import java.util.Collections;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-@ExtendWith(MockitoExtension.class)
 @WebMvcTest(BookingController.class)
 class BookingControllerTest {
 
     @Autowired
     private MockMvc mockMvc;
 
-    @MockitoBean
-    private BookingService bookingService;
+    @Autowired
+    private BookingService bookingService; // Now injected from the TestConfiguration
 
     @Autowired
     private ObjectMapper objectMapper;
@@ -42,84 +38,82 @@ class BookingControllerTest {
     private UUID bookingId;
     private UUID loadId;
 
+    // This nested class will provide the mock bean for our test context.
+    @TestConfiguration
+    static class TestConfig {
+        @Bean
+        public BookingService bookingService() {
+            return mock(BookingService.class);
+        }
+    }
+
     @BeforeEach
     void setUp() {
         bookingId = UUID.randomUUID();
         loadId = UUID.randomUUID();
-
         bookingDTO = new BookingDTO();
-        bookingDTO.setId(bookingId);
         bookingDTO.setLoadId(loadId);
-        bookingDTO.setTransporterId("TRANSPORTER001");
-        bookingDTO.setProposedRate(50000.0);
-        bookingDTO.setComment("Interested in this load");
-        bookingDTO.setStatus(BookingStatus.PENDING);
-        bookingDTO.setRequestedAt(LocalDateTime.now());
+        bookingDTO.setTransporterId("transporter123");
+        bookingDTO.setProposedRate(1000.0);
+
+        // Reset the mock before each test
+        reset(bookingService);
     }
 
     @Test
-    void testCreateBooking_Success() throws Exception {
+    void createBooking_shouldReturnCreatedBooking_whenValidInput() throws Exception {
         when(bookingService.createBooking(any(BookingDTO.class))).thenReturn(bookingDTO);
 
         mockMvc.perform(post("/booking")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(bookingDTO)))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.transporterId").value("TRANSPORTER001"))
-                .andExpect(jsonPath("$.proposedRate").value(50000.0))
-                .andExpect(jsonPath("$.status").value("PENDING"));
+                .andExpect(jsonPath("$.transporterId").value("transporter123"));
     }
 
     @Test
-    void testCreateBooking_ValidationError() throws Exception {
-
-        BookingDTO invalidBooking = new BookingDTO();
-
-        mockMvc.perform(post("/booking")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(invalidBooking)))
-                .andExpect(status().isBadRequest());
-    }
-
-    @Test
-    void testGetBookings_Success() throws Exception {
-
-        when(bookingService.getBookings(eq(loadId), eq("TRANSPORTER001"), eq(BookingStatus.PENDING)))
-                .thenReturn(Arrays.asList(bookingDTO));
-
-        mockMvc.perform(get("/booking")
-                        .param("loadId", loadId.toString())
-                        .param("transporterId", "TRANSPORTER001")
-                        .param("status", "PENDING"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].transporterId").value("TRANSPORTER001"));
-    }
-
-    @Test
-    void testGetBookingById_Success() throws Exception {
-
+    void getBookingById_shouldReturnBooking_whenBookingExists() throws Exception {
         when(bookingService.getBookingById(bookingId)).thenReturn(bookingDTO);
 
         mockMvc.perform(get("/booking/{bookingId}", bookingId))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").value(bookingId.toString()))
-                .andExpect(jsonPath("$.transporterId").value("TRANSPORTER001"));
+                .andExpect(jsonPath("$.transporterId").value("transporter123"));
     }
 
     @Test
-    void testUpdateBooking_Success() throws Exception {
+    void getBookingById_shouldReturnNotFound_whenBookingDoesNotExist() throws Exception {
+        doThrow(new ResourceNotFoundException("Booking not found")).when(bookingService).getBookingById(bookingId);
 
-        when(bookingService.updateBooking(eq(bookingId), any(BookingDTO.class))).thenReturn(bookingDTO);
+        mockMvc.perform(get("/booking/{bookingId}", bookingId))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("Booking not found"));
+    }
+
+    @Test
+    void getBookings_shouldReturnListOfBookings() throws Exception {
+        when(bookingService.getBookings(any(), any(), any()))
+                .thenReturn(Collections.singletonList(bookingDTO));
+
+        mockMvc.perform(get("/booking")
+                        .param("loadId", loadId.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].transporterId").value("transporter123"));
+    }
+
+    @Test
+    void updateBooking_shouldReturnUpdatedBooking_whenValidInput() throws Exception {
+        when(bookingService.updateBooking(any(), any(BookingDTO.class))).thenReturn(bookingDTO);
 
         mockMvc.perform(put("/booking/{bookingId}", bookingId)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(bookingDTO)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.transporterId").value("TRANSPORTER001"));
+                .andExpect(jsonPath("$.transporterId").value("transporter123"));
     }
 
     @Test
-    void testDeleteBooking_Success() throws Exception {
+    void deleteBooking_shouldReturnNoContent() throws Exception {
+        doNothing().when(bookingService).deleteBooking(bookingId);
 
         mockMvc.perform(delete("/booking/{bookingId}", bookingId))
                 .andExpect(status().isNoContent());

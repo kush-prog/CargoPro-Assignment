@@ -1,12 +1,14 @@
 package com.kush.cargoProAssignment.integration;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.kush.cargoProAssignment.dto.BookingDTO;
 import com.kush.cargoProAssignment.dto.FacilityDTO;
 import com.kush.cargoProAssignment.dto.LoadDTO;
+import com.kush.cargoProAssignment.model.enums.BookingStatus;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureWebMvc;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
@@ -14,12 +16,13 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.UUID;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @SpringBootTest
-@AutoConfigureWebMvc
+@AutoConfigureMockMvc
 @ActiveProfiles("test")
 @Transactional
 class LoadBookingIntegrationTest {
@@ -51,45 +54,81 @@ class LoadBookingIntegrationTest {
     }
 
     @Test
-    void testCompleteLoadBookingFlow() throws Exception {
-        // Create a load
+    void testFullLoadBookingFlow() throws Exception {
+        // 1. Create a Load
         String loadResponse = mockMvc.perform(post("/load")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(loadDTO)))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(loadDTO)))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.status").value("POSTED"))
                 .andReturn().getResponse().getContentAsString();
 
         LoadDTO createdLoad = objectMapper.readValue(loadResponse, LoadDTO.class);
-        String loadId = createdLoad.getId().toString();
+        UUID loadId = createdLoad.getId();
 
-        // Get the created load
+        // 2. Create a Booking for the Load
+        BookingDTO bookingDTO = new BookingDTO();
+        bookingDTO.setLoadId(loadId);
+        bookingDTO.setTransporterId("TRANSPORTER001");
+        bookingDTO.setProposedRate(1200.0);
+        String bookingResponse = mockMvc.perform(post("/booking")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(bookingDTO)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("PENDING"))
+                .andReturn().getResponse().getContentAsString();
+
+        BookingDTO createdBooking = objectMapper.readValue(bookingResponse, BookingDTO.class);
+        UUID bookingId = createdBooking.getId();
+
+        // Check the updated load status by fetching it again
         mockMvc.perform(get("/load/{loadId}", loadId))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.shipperId").value("SHIPPER001"));
+                .andExpect(jsonPath("$.status").value("BOOKED"));
 
-        // Get loads with filters
-        mockMvc.perform(get("/load")
-                .param("shipperId", "SHIPPER001")
-                .param("status", "POSTED"))
+        // 3. Update the Booking to ACCEPTED
+        createdBooking.setStatus(BookingStatus.ACCEPTED);
+        mockMvc.perform(put("/booking/{bookingId}", bookingId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(createdBooking)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.content").isArray())
-                .andExpect(jsonPath("$.content[0].shipperId").value("SHIPPER001"));
+                .andExpect(jsonPath("$.status").value("ACCEPTED"));
 
-        // Update the load
-        loadDTO.setComment("Updated comment");
-        mockMvc.perform(put("/load/{loadId}", loadId)
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(loadDTO)))
+        // Verify Load status remains BOOKED
+        mockMvc.perform(get("/load/{loadId}", loadId))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.comment").value("Updated comment"));
+                .andExpect(jsonPath("$.status").value("BOOKED"));
 
-        // Delete the load
-        mockMvc.perform(delete("/load/{loadId}", loadId))
+        // 4. Create another booking for the same load
+        BookingDTO anotherBookingDTO = new BookingDTO();
+        anotherBookingDTO.setLoadId(loadId);
+        anotherBookingDTO.setTransporterId("TRANSPORTER002");
+        anotherBookingDTO.setProposedRate(1100.0);
+        String anotherBookingResponse = mockMvc.perform(post("/booking")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(anotherBookingDTO)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("PENDING"))
+                .andReturn().getResponse().getContentAsString();
+        BookingDTO anotherBooking = objectMapper.readValue(anotherBookingResponse, BookingDTO.class);
+        UUID anotherBookingId = anotherBooking.getId();
+
+        // 5. Delete the first booking
+        mockMvc.perform(delete("/booking/{bookingId}", bookingId))
                 .andExpect(status().isNoContent());
 
-        // Verify load is deleted
+        // Verify Load status remains BOOKED because another booking still exists
         mockMvc.perform(get("/load/{loadId}", loadId))
-                .andExpect(status().isNotFound());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("POSTED"));
+
+        // 6. Delete the last remaining booking
+        mockMvc.perform(delete("/booking/{bookingId}", anotherBookingId))
+                .andExpect(status().isNoContent());
+
+        // Verify that the load's status is reverted to CANCELLED since it was the last booking
+        mockMvc.perform(get("/load/{loadId}", loadId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CANCELLED"));
     }
 }

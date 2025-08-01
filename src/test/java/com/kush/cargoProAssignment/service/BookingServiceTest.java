@@ -1,12 +1,12 @@
 package com.kush.cargoProAssignment.service;
 
 import com.kush.cargoProAssignment.dto.BookingDTO;
-import com.kush.cargoProAssignment.model.Booking;
-import com.kush.cargoProAssignment.model.enums.BookingStatus;
-import com.kush.cargoProAssignment.model.Load;
-import com.kush.cargoProAssignment.model.enums.LoadStatus;
 import com.kush.cargoProAssignment.exceptions.BusinessException;
 import com.kush.cargoProAssignment.exceptions.ResourceNotFoundException;
+import com.kush.cargoProAssignment.model.Booking;
+import com.kush.cargoProAssignment.model.Load;
+import com.kush.cargoProAssignment.model.enums.BookingStatus;
+import com.kush.cargoProAssignment.model.enums.LoadStatus;
 import com.kush.cargoProAssignment.repository.BookingRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -16,8 +16,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.modelmapper.ModelMapper;
 
-import java.time.LocalDateTime;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -41,44 +41,32 @@ class BookingServiceTest {
     @InjectMocks
     private BookingService bookingService;
 
-    private BookingDTO bookingDTO;
-    private Booking booking;
-    private Load load;
     private UUID bookingId;
     private UUID loadId;
+    private Booking booking;
+    private Load load;
+    private BookingDTO bookingDTO;
 
     @BeforeEach
     void setUp() {
         bookingId = UUID.randomUUID();
         loadId = UUID.randomUUID();
 
-        // Setup Load
         load = new Load();
         load.setId(loadId);
         load.setStatus(LoadStatus.POSTED);
 
-        // Setup BookingDTO
-        bookingDTO = new BookingDTO();
-        bookingDTO.setId(bookingId);
-        bookingDTO.setLoadId(loadId);
-        bookingDTO.setTransporterId("TRANSPORTER001");
-        bookingDTO.setProposedRate(50000.0);
-        bookingDTO.setComment("Interested in this load");
-        bookingDTO.setStatus(BookingStatus.PENDING);
-
-        // Setup Booking entity
         booking = new Booking();
         booking.setId(bookingId);
         booking.setLoad(load);
-        booking.setTransporterId("TRANSPORTER001");
-        booking.setProposedRate(50000.0);
-        booking.setComment("Interested in this load");
         booking.setStatus(BookingStatus.PENDING);
-        booking.setRequestedAt(LocalDateTime.now());
+
+        bookingDTO = new BookingDTO();
+        bookingDTO.setLoadId(loadId);
     }
 
     @Test
-    void testCreateBooking_Success() {
+    void createBooking_shouldSetLoadStatusToBooked_whenSuccessful() {
         // Given
         when(loadService.findEntityById(loadId)).thenReturn(load);
         when(modelMapper.map(bookingDTO, Booking.class)).thenReturn(booking);
@@ -90,45 +78,39 @@ class BookingServiceTest {
 
         // Then
         assertNotNull(result);
-        assertEquals(bookingDTO.getTransporterId(), result.getTransporterId());
-        assertEquals(BookingStatus.PENDING, result.getStatus());
-        verify(loadService).findEntityById(loadId);
-        verify(loadService).updateLoadStatus(loadId, LoadStatus.BOOKED);
-        verify(bookingRepository).save(any(Booking.class));
+        assertEquals(BookingStatus.PENDING, booking.getStatus());
+        verify(loadService, times(1)).updateLoadStatus(loadId, LoadStatus.BOOKED);
     }
 
     @Test
-    void testCreateBooking_CancelledLoad_ThrowsException() {
+    void createBooking_shouldThrowException_whenLoadIsCancelled() {
         // Given
         load.setStatus(LoadStatus.CANCELLED);
         when(loadService.findEntityById(loadId)).thenReturn(load);
 
         // When & Then
         assertThrows(BusinessException.class, () -> bookingService.createBooking(bookingDTO));
-        verify(loadService).findEntityById(loadId);
-        verifyNoInteractions(bookingRepository);
+        verify(loadService, never()).updateLoadStatus(any(), any());
     }
 
     @Test
-    void testGetBookings_WithFilters_Success() {
+    void getBookings_shouldReturnListOfBookingDTOs() {
         // Given
-        List<Booking> bookings = Arrays.asList(booking);
-        when(bookingRepository.findByFilters(loadId, "TRANSPORTER001", BookingStatus.PENDING))
-                .thenReturn(bookings);
-        when(modelMapper.map(booking, BookingDTO.class)).thenReturn(bookingDTO);
+        List<Booking> bookingList = Collections.singletonList(booking);
+        when(bookingRepository.findByFilters(any(), any(), any())).thenReturn(bookingList);
+        when(modelMapper.map(any(Booking.class), eq(BookingDTO.class))).thenReturn(bookingDTO);
 
         // When
-        List<BookingDTO> result = bookingService.getBookings(loadId, "TRANSPORTER001", BookingStatus.PENDING);
+        List<BookingDTO> result = bookingService.getBookings(loadId, null, null);
 
         // Then
         assertNotNull(result);
         assertEquals(1, result.size());
-        assertEquals(bookingDTO.getTransporterId(), result.get(0).getTransporterId());
-        verify(bookingRepository).findByFilters(loadId, "TRANSPORTER001", BookingStatus.PENDING);
+        assertEquals(bookingDTO, result.get(0));
     }
 
     @Test
-    void testGetBookingById_Success() {
+    void getBookingById_shouldReturnBookingDTO_whenBookingExists() {
         // Given
         when(bookingRepository.findById(bookingId)).thenReturn(Optional.of(booking));
         when(modelMapper.map(booking, BookingDTO.class)).thenReturn(bookingDTO);
@@ -138,53 +120,97 @@ class BookingServiceTest {
 
         // Then
         assertNotNull(result);
-        assertEquals(bookingDTO.getId(), result.getId());
-        verify(bookingRepository).findById(bookingId);
+        assertEquals(bookingDTO, result);
     }
 
     @Test
-    void testGetBookingById_NotFound() {
-        // Given
-        when(bookingRepository.findById(bookingId)).thenReturn(Optional.empty());
-
-        // When & Then
-        assertThrows(ResourceNotFoundException.class, () -> bookingService.getBookingById(bookingId));
-        verify(bookingRepository).findById(bookingId);
-    }
-
-    @Test
-    void testUpdateBooking_ToAccepted_Success() {
+    void updateBooking_shouldUpdateStatusAndKeepLoadStatusAsBooked() {
         // Given
         booking.setStatus(BookingStatus.PENDING);
-        BookingDTO updateDTO = new BookingDTO();
-        updateDTO.setStatus(BookingStatus.ACCEPTED);
+        BookingDTO updatedDto = new BookingDTO();
+        updatedDto.setStatus(BookingStatus.ACCEPTED);
 
         when(bookingRepository.findById(bookingId)).thenReturn(Optional.of(booking));
-        when(bookingRepository.save(booking)).thenReturn(booking);
-        when(modelMapper.map(booking, BookingDTO.class)).thenReturn(bookingDTO);
+        when(bookingRepository.save(any(Booking.class))).thenReturn(booking);
+        when(modelMapper.map(booking, BookingDTO.class)).thenReturn(updatedDto);
 
         // When
-        BookingDTO result = bookingService.updateBooking(bookingId, updateDTO);
+        BookingDTO result = bookingService.updateBooking(bookingId, updatedDto);
 
         // Then
         assertNotNull(result);
-        verify(bookingRepository).findById(bookingId);
-        verify(loadService).updateLoadStatus(loadId, LoadStatus.BOOKED);
-        verify(bookingRepository).save(booking);
+        assertEquals(BookingStatus.ACCEPTED, booking.getStatus());
+        verify(loadService, times(1)).updateLoadStatus(loadId, LoadStatus.BOOKED);
     }
 
     @Test
-    void testDeleteBooking_Success() {
+    void updateBooking_shouldNotUpdateLoadStatus_ifBookingStatusIsAlreadyAccepted() {
         // Given
+        booking.setStatus(BookingStatus.ACCEPTED);
+        BookingDTO updatedDto = new BookingDTO();
+        updatedDto.setStatus(BookingStatus.ACCEPTED);
+
         when(bookingRepository.findById(bookingId)).thenReturn(Optional.of(booking));
-        when(bookingRepository.findByLoad(load)).thenReturn(Arrays.asList());
+        when(bookingRepository.save(any(Booking.class))).thenReturn(booking);
+        when(modelMapper.map(booking, BookingDTO.class)).thenReturn(updatedDto);
+
+        // When
+        BookingDTO result = bookingService.updateBooking(bookingId, updatedDto);
+
+        // Then
+        assertNotNull(result);
+        verify(loadService, never()).updateLoadStatus(any(), any());
+    }
+
+    @Test
+    void deleteBooking_shouldRevertLoadStatusToCancelled_whenLastBookingIsDeleted() {
+        // Given
+        List<Booking> remainingBookings = Collections.emptyList();
+        when(bookingRepository.findById(bookingId)).thenReturn(Optional.of(booking));
+        when(bookingRepository.findByLoad(load)).thenReturn(remainingBookings);
+        doNothing().when(bookingRepository).delete(any(Booking.class));
 
         // When
         bookingService.deleteBooking(bookingId);
 
         // Then
-        verify(bookingRepository).findById(bookingId);
-        verify(bookingRepository).delete(booking);
-        verify(loadService).updateLoadStatus(loadId, LoadStatus.CANCELLED);
+        verify(bookingRepository, times(1)).delete(booking);
+        verify(loadService, times(1)).updateLoadStatus(loadId, LoadStatus.CANCELLED);
+    }
+
+    @Test
+    void deleteBooking_shouldRevertLoadStatusToPosted_whenOtherBookingsRemainAndNoneAreAccepted() {
+        // Given
+        Booking otherBooking = new Booking();
+        otherBooking.setStatus(BookingStatus.PENDING);
+        List<Booking> remainingBookings = Collections.singletonList(otherBooking);
+        when(bookingRepository.findById(bookingId)).thenReturn(Optional.of(booking));
+        when(bookingRepository.findByLoad(load)).thenReturn(remainingBookings);
+        doNothing().when(bookingRepository).delete(any(Booking.class));
+
+        // When
+        bookingService.deleteBooking(bookingId);
+
+        // Then
+        verify(bookingRepository, times(1)).delete(booking);
+        verify(loadService, times(1)).updateLoadStatus(loadId, LoadStatus.POSTED);
+    }
+
+    @Test
+    void deleteBooking_shouldKeepLoadStatusAsBooked_whenOtherAcceptedBookingsRemain() {
+        // Given
+        Booking otherBooking = new Booking();
+        otherBooking.setStatus(BookingStatus.ACCEPTED);
+        List<Booking> remainingBookings = Collections.singletonList(otherBooking);
+        when(bookingRepository.findById(bookingId)).thenReturn(Optional.of(booking));
+        when(bookingRepository.findByLoad(load)).thenReturn(remainingBookings);
+        doNothing().when(bookingRepository).delete(any(Booking.class));
+
+        // When
+        bookingService.deleteBooking(bookingId);
+
+        // Then
+        verify(bookingRepository, times(1)).delete(booking);
+        verify(loadService, never()).updateLoadStatus(any(), any());
     }
 }

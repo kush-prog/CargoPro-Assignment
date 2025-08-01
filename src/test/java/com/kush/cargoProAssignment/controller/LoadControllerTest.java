@@ -4,25 +4,24 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kush.cargoProAssignment.controllers.LoadController;
 import com.kush.cargoProAssignment.dto.FacilityDTO;
 import com.kush.cargoProAssignment.dto.LoadDTO;
-import com.kush.cargoProAssignment.model.enums.LoadStatus;
+import com.kush.cargoProAssignment.exceptions.ResourceNotFoundException;
 import com.kush.cargoProAssignment.service.LoadService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.data.domain.Page;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.http.MediaType;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.LocalDateTime;
-import java.util.Arrays;
+import java.util.Collections;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -32,7 +31,7 @@ class LoadControllerTest {
     @Autowired
     private MockMvc mockMvc;
 
-    @MockitoBean
+    @Autowired
     private LoadService loadService;
 
     @Autowired
@@ -41,91 +40,103 @@ class LoadControllerTest {
     private LoadDTO loadDTO;
     private UUID loadId;
 
+    @TestConfiguration
+    static class TestConfig {
+        @Bean
+        public LoadService loadService() {
+            return mock(LoadService.class);
+        }
+    }
+
     @BeforeEach
     void setUp() {
         loadId = UUID.randomUUID();
-
-        FacilityDTO facilityDTO = new FacilityDTO();
-        facilityDTO.setLoadingPoint("Delhi");
-        facilityDTO.setUnloadingPoint("Mumbai");
-        facilityDTO.setLoadingDate(LocalDateTime.now().plusDays(1));
-        facilityDTO.setUnloadingDate(LocalDateTime.now().plusDays(3));
-
         loadDTO = new LoadDTO();
-        loadDTO.setId(loadId);
-        loadDTO.setShipperId("SHIPPER001");
-        loadDTO.setFacility(facilityDTO);
+        loadDTO.setShipperId("shipper1");
         loadDTO.setProductType("Electronics");
         loadDTO.setTruckType("Container");
-        loadDTO.setNoOfTrucks(2);
-        loadDTO.setWeight(5000.0);
-        loadDTO.setComment("Fragile items");
-        loadDTO.setStatus(LoadStatus.POSTED);
+        loadDTO.setNoOfTrucks(1);
+        loadDTO.setWeight(100.0);
+
+        // Correctly initialize FacilityDTO to pass validation
+        FacilityDTO facilityDTO = new FacilityDTO();
+        facilityDTO.setLoadingPoint("Point A");
+        facilityDTO.setUnloadingPoint("Point B");
+        facilityDTO.setLoadingDate(LocalDateTime.now());
+        facilityDTO.setUnloadingDate(LocalDateTime.now().plusDays(1));
+        loadDTO.setFacility(facilityDTO);
+
+        reset(loadService);
     }
 
     @Test
-    void testCreateLoad_Success() throws Exception {
+    void createLoad_shouldReturnCreatedLoad_whenValidInput() throws Exception {
         when(loadService.createLoad(any(LoadDTO.class))).thenReturn(loadDTO);
 
         mockMvc.perform(post("/load")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(loadDTO)))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.shipperId").value("SHIPPER001"))
-                .andExpect(jsonPath("$.productType").value("Electronics"))
-                .andExpect(jsonPath("$.status").value("POSTED"));
+                .andExpect(jsonPath("$.shipperId").value("shipper1"));
     }
 
     @Test
-    void testCreateLoad_ValidationError() throws Exception {
-
-        LoadDTO invalidLoad = new LoadDTO();
+    void createLoad_shouldReturnBadRequest_whenInvalidInput() throws Exception {
+        LoadDTO invalidLoadDTO = new LoadDTO(); // Missing all required fields
 
         mockMvc.perform(post("/load")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(invalidLoad)))
-                .andExpect(status().isBadRequest());
+                        .content(objectMapper.writeValueAsString(invalidLoadDTO)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Validation failed"))
+                .andExpect(jsonPath("$.errors.shipperId").exists());
     }
 
     @Test
-    void testGetLoads_Success() throws Exception {
-        Page<LoadDTO> loadPage = new PageImpl<>(Arrays.asList(loadDTO));
-        when(loadService.getLoads(eq("SHIPPER001"), eq("Container"), eq(LoadStatus.POSTED), eq(1), eq(10)))
-                .thenReturn(loadPage);
-
-        mockMvc.perform(get("/load")
-                        .param("shipperId", "SHIPPER001")
-                        .param("truckType", "Container")
-                        .param("status", "POSTED")
-                        .param("page", "1")
-                        .param("size", "10"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.content[0].shipperId").value("SHIPPER001"));
-    }
-
-    @Test
-    void testGetLoadById_Success() throws Exception {
-
+    void getLoadById_shouldReturnLoad_whenLoadExists() throws Exception {
         when(loadService.getLoadById(loadId)).thenReturn(loadDTO);
 
         mockMvc.perform(get("/load/{loadId}", loadId))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").value(loadId.toString()))
-                .andExpect(jsonPath("$.shipperId").value("SHIPPER001"));
+                .andExpect(jsonPath("$.shipperId").value("shipper1"));
     }
 
     @Test
-    void testUpdateLoad_Success() throws Exception{
-        when(loadService.updateLoad(eq(loadId), any(LoadDTO.class))).thenReturn(loadDTO);
+    void getLoadById_shouldReturnNotFound_whenLoadDoesNotExist() throws Exception {
+        doThrow(new ResourceNotFoundException("Load not found")).when(loadService).getLoadById(loadId);
+
+        mockMvc.perform(get("/load/{loadId}", loadId))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("Load not found"));
+    }
+
+    @Test
+    void getLoads_shouldReturnPageOfLoads() throws Exception {
+        when(loadService.getLoads(any(), any(), any(), anyInt(), anyInt()))
+                .thenReturn(new PageImpl<>(Collections.singletonList(loadDTO)));
+
+        mockMvc.perform(get("/load")
+                        .param("page", "1")
+                        .param("size", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1));
+    }
+
+    @Test
+    void updateLoad_shouldReturnUpdatedLoad_whenValidInput() throws Exception {
+        when(loadService.updateLoad(any(), any(LoadDTO.class))).thenReturn(loadDTO);
+
         mockMvc.perform(put("/load/{loadId}", loadId)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(loadDTO)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.shipperId").value("SHIPPER001"));
+                .andExpect(jsonPath("$.shipperId").value("shipper1"));
     }
 
     @Test
-    void testDeleteLoad_Success() throws Exception {
+    void deleteLoad_shouldReturnNoContent() throws Exception {
+        doNothing().when(loadService).deleteLoad(loadId);
+
         mockMvc.perform(delete("/load/{loadId}", loadId))
                 .andExpect(status().isNoContent());
     }

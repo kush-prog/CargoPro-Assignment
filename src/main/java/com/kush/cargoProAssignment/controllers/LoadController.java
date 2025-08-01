@@ -6,6 +6,7 @@ import com.kush.cargoProAssignment.service.LoadService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.http.HttpStatus;
@@ -17,10 +18,10 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/load")
 @Tag(name = "Load Management", description = "APIs for managing loads")
+@RequiredArgsConstructor
 public class LoadController {
 
-    @Autowired
-    private LoadService loadService;
+    private final LoadService loadService;
 
     @PostMapping
     @Operation(summary = "Create a new load")

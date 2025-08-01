@@ -8,6 +8,7 @@ import com.kush.cargoProAssignment.model.Load;
 import com.kush.cargoProAssignment.model.enums.BookingStatus;
 import com.kush.cargoProAssignment.model.enums.LoadStatus;
 import com.kush.cargoProAssignment.repository.BookingRepository;
+import lombok.RequiredArgsConstructor;
 import org.modelmapper.ModelMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -19,16 +20,14 @@ import java.util.stream.Collectors;
 
 @Service
 @Transactional
+@RequiredArgsConstructor
 public class BookingService {
 
-    @Autowired
-    private BookingRepository bookingRepository;
+    private final BookingRepository bookingRepository;
 
-    @Autowired
-    private LoadService loadService;
+    private final LoadService loadService;
 
-    @Autowired
-    private ModelMapper modelMapper;
+    private final ModelMapper modelMapper;
 
     public BookingDTO createBooking(BookingDTO bookingDTO) {
         Load load = loadService.findEntityById(bookingDTO.getLoadId());

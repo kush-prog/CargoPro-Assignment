@@ -5,6 +5,7 @@ import com.kush.cargoProAssignment.exceptions.ResourceNotFoundException;
 import com.kush.cargoProAssignment.model.Load;
 import com.kush.cargoProAssignment.model.enums.LoadStatus;
 import com.kush.cargoProAssignment.repository.LoadRepository;
+import lombok.RequiredArgsConstructor;
 import org.modelmapper.ModelMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
@@ -17,13 +18,11 @@ import java.util.UUID;
 
 @Service
 @Transactional
+@RequiredArgsConstructor
 public class LoadService {
 
-    @Autowired
-    private LoadRepository loadRepository;
-
-    @Autowired
-    private ModelMapper modelMapper;
+    private final LoadRepository loadRepository;
+    private final ModelMapper modelMapper;
 
     public LoadDTO createLoad(LoadDTO loadDTO) {
         Load load = modelMapper.map(loadDTO, Load.class);
