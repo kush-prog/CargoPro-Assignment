@@ -13,7 +13,6 @@ public class SwaggerConfig {
         return new OpenAPI()
                 .info(new Info()
                         .title("Load & Booking Management API")
-                        .version("1.0")
                         .description("API for managing load and booking operations"));
     }
 }
